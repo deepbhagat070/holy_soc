@@ -1,0 +1,54 @@
+`timescale 1ns / 1ps
+
+module if_id_reg(
+    input clk,
+    input rst,
+    
+    // OLD: input flush,
+    // OLD: input if_id_write,
+    
+    // NEW: Standardized clear port replaces flush. if_id_write is removed as global en handles it.
+    input clr,
+    input en,
+    
+    input [31:0] if_pc,
+    input [31:0] if_pc_plus_4,   
+    input [31:0] if_instruction,
+   
+    output reg [31:0] id_pc,
+    output reg [31:0] id_pc_plus_4, 
+    output reg [31:0] id_instruction
+);
+
+    always@(posedge clk or posedge rst) begin
+        if(rst) begin
+            id_pc          <= 32'b0;
+            id_pc_plus_4   <= 32'b0;
+            id_instruction <= 32'b0;
+        end
+        else if (en) begin
+            // OLD:
+            // if (flush) begin
+            //     id_instruction <= 32'h00000000; 
+            //     id_pc          <= 32'b0; 
+            //     id_pc_plus_4   <= 32'b0;
+            // end
+            // else if( if_id_write) begin 
+            //     id_pc          <= if_pc;
+            //     id_pc_plus_4   <= if_pc_plus_4;
+            //     id_instruction <= if_instruction;
+            // end
+
+            // NEW:
+            if (clr) begin
+                id_instruction <= 32'h00000000; 
+                id_pc          <= 32'b0; 
+                id_pc_plus_4   <= 32'b0;
+            end else begin 
+                id_pc          <= if_pc;
+                id_pc_plus_4   <= if_pc_plus_4;
+                id_instruction <= if_instruction;
+            end
+        end
+    end
+endmodule
