@@ -1,3 +1,6 @@
+
+![Uploading holy_soc_banner.png…]()
+
 # holy_soc
 # Holy SoC RISC-V Architecture
 
