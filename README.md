@@ -5,9 +5,9 @@ This repository tracks the development of a 5-stage pipelined RISC-V System-on-C
 
 ## Directory Structure
 
-*   `/holy_soc_old/` - Legacy baseline architecture.
+*   `/holy_soc_old/` - Fully working soc.
 *   `/holy_soc/` - Active development target with AXI interconnect and cache subsystem.
-*   `/firmware/` - C-based bare-metal test suites for hardware verification.
+
 
 ---
 
