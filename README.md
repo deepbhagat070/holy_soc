@@ -1,5 +1,5 @@
 
-![Uploading holy_soc_banner.png…]()
+![Holy SoC Architecture Banner](docs/holy_soc_banner.png)
 
 # holy_soc
 # Holy SoC RISC-V Architecture
