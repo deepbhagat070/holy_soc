@@ -46,5 +46,5 @@ This directory represents the modernized SoC. The core pipeline logic remains si
 To run the standard torture tests on either core:
 
 1.  Compile the firmware test suite targeting the specific architecture's memory map.
-2.  Run the Verilog simulation (e.g., using Verilator or Icarus Verilog).
+2.  Run the Verilog simulation (e.g. Vivado).
 3.  Ensure the new AXI wrappers in `holy_soc` pass standard protocol assertion checks during peripheral integration.
