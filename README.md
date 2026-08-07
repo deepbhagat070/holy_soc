@@ -1,7 +1,7 @@
 
 ![Holy SoC Architecture Banner](docs/holy_soc_banner.png)
 
-# holy_soc
+
 # Holy SoC RISC-V Architecture
 
 This repository tracks the development of a 5-stage pipelined RISC-V System-on-Chip. It currently houses two distinct architectural iterations: a stable baseline using a custom interconnect, and a next-generation architecture implementing standard AMBA AXI and a cache hierarchy.
@@ -39,12 +39,5 @@ This directory represents the modernized SoC. The core pipeline logic remains si
 *   **Memory Subsystem:** Implementation of a cache system (Instruction and Data caches). The core no longer talks directly to SRAM; it requests data from the cache controllers, which handle AXI transactions to main memory on cache misses.
 *   **Pipeline Control:** The hazard detection unit has been updated to handle variable-latency memory accesses. The pipeline will now dynamically stall based on cache miss penalties and AXI bus backpressure.
 
----
 
-## Verification
 
-To run the standard torture tests on either core:
-
-1.  Compile the firmware test suite targeting the specific architecture's memory map.
-2.  Run the Verilog simulation (e.g. Vivado).
-3.  Ensure the new AXI wrappers in `holy_soc` pass standard protocol assertion checks during peripheral integration.
