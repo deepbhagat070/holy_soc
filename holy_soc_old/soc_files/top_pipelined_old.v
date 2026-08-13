@@ -9,18 +9,24 @@ module top_pipelined (
     output wire [31:0] dmem_wdata,
     output wire [3:0]  dmem_wstrb,
     output wire        dmem_read_en,
-    input  wire [31:0] dmem_rdata
+    input  wire [31:0] dmem_rdata,
+    output wire [31:0] imem_addr,
+    input  wire [31:0] imem_rdata,
+    input  wire        imem_ready,
+    output wire        imem_req,
+    output wire        icache_flush_out,
+    output wire        dcache_flush_out,  
+    input  wire        dcache_flush_done  
 );
 
-    wire        mem_stall;
-    wire        reg_stall;
-    wire        load_use_hazard;
-    wire        PC_en;
-    wire        IF_ID_en;
-    wire        IF_ID_clr;
-    wire        ID_EX_en;
-    wire        ID_EX_clr;
-        
+    wire        pc_en;
+    wire        if_id_en;
+    wire        if_id_clr;
+    wire        id_ex_en;
+    wire        id_ex_clr;
+    wire        ex_mem_en;
+    wire        mem_wb_en;
+    
     wire [1:0]  forward_A;
     wire [1:0]  forward_B;
 
@@ -35,20 +41,12 @@ module top_pipelined (
     wire [31:0] if_instruction;
 
     wire        trap_flush;
-    wire        halt_cpu = 1'b0; 
-
-    assign mem_stall = ~dmem_ready;
-    assign PC_en     = ~mem_stall & (trap_flush | ~reg_stall) & ~halt_cpu;
-    assign IF_ID_en  = ~mem_stall & (trap_flush | ~reg_stall) & ~halt_cpu;
-    assign IF_ID_clr = ~mem_stall & (trap_flush | control_flush); 
-    assign ID_EX_en  = ~mem_stall;
-    assign ID_EX_clr = ~mem_stall & (trap_flush | reg_stall);
 
     pc my_pc (
         .clk        (clk), 
         .rst        (rst), 
         .pc_write   (1'b1), 
-        .en         (PC_en),
+        .en         (pc_en),
         .pc_next    (if_pc_next), 
         .pc         (if_pc)
     );
@@ -58,46 +56,52 @@ module top_pipelined (
         .pc_plus_4  (if_pc_plus_4)
     );
 
-    inst_mem my_rom (
-        .pc         (if_pc), 
-        .instruction(if_instruction)
-    );
+    assign imem_addr = if_pc;
+    assign imem_req  = 1'b1; 
+    assign if_instruction = imem_rdata;
 
     if_id_reg my_if_id_reg (
-        .clk            (clk),
-        .rst            (rst), 
-        .clr            (IF_ID_clr), 
-        .en             (IF_ID_en),  
-        .if_pc          (if_pc),
-        .if_pc_plus_4   (if_pc_plus_4),
-        .if_instruction (if_instruction),
-        .id_pc          (id_pc),
-        .id_pc_plus_4   (id_pc_plus_4),
-        .id_instruction (id_instruction)
+        .clk           (clk),
+        .rst           (rst), 
+        .clr           (if_id_clr), 
+        .en            (if_id_en),  
+        .if_pc         (if_pc),
+        .if_pc_plus_4  (if_pc_plus_4),
+        .if_instruction(if_instruction),
+        .id_pc         (id_pc),
+        .id_pc_plus_4  (id_pc_plus_4),
+        .id_instruction(id_instruction)
     );
 
-    wire        id_Branch;
-    wire        id_MemRead;
-    wire        id_MemWrite;
-    wire        id_ALUSrc;
-    wire [1:0]  id_ALUSrcA;
+    wire        id_Branch, id_MemRead, id_MemWrite, id_ALUSrc;
+    wire [1:0]  id_ALUSrcA, id_ALUOp, id_Jump;
     wire        id_RegWrite;
-    wire [1:0]  id_ALUOp;
-    wire [1:0]  id_Jump;
-    wire [2:0]  id_ImmSrc;
-    wire [2:0]  id_MemtoReg;
+    wire [2:0]  id_ImmSrc, id_MemtoReg;
     wire [3:0]  id_ALU_Ctrl;
-    wire        is_system_id;
-    wire        id_is_ecall; 
-    wire        id_is_ebreak; 
-    wire        id_csr_we;
+    wire        is_system_id, id_is_ecall, id_is_ebreak, id_csr_we, id_is_fence_i;
+
+    reg fence_active;
+    always @(posedge clk) begin
+        if (rst) begin
+            fence_active <= 1'b0;
+        end else begin
+            if (id_is_fence_i && !fence_active)
+                fence_active <= 1'b1; // Lock stall
+            else if (fence_active && dcache_flush_done)
+                fence_active <= 1'b0; // Release stall
+        end
+    end
+
+    assign dcache_flush_out = id_is_fence_i && !fence_active; 
+    
+    assign icache_flush_out = fence_active && dcache_flush_done;
+    
+    wire fence_stall = id_is_fence_i && (!fence_active || !dcache_flush_done);
 
     wire [4:0]  id_rs1_addr = id_instruction[19:15];
     wire [4:0]  id_rs2_addr = id_instruction[24:20];
-    wire [31:0] id_rs1_data;
-    wire [31:0] id_rs2_data;
-    wire [31:0] id_imm_ext;
-    wire        id_is_mret  = is_system_id && (id_instruction[14:12] == 3'b000) && (id_instruction[31:20] == 12'h302);
+    wire [31:0] id_rs1_data, id_rs2_data, id_imm_ext;
+    wire        id_is_mret;  
 
     main_control my_main_control (
         .opcode    (id_instruction[6:0]),
@@ -113,11 +117,13 @@ module top_pipelined (
         .RegWrite  (id_RegWrite),
         .ImmSrc    (id_ImmSrc),
         .Jump      (id_Jump),
+        .is_mret    (id_is_mret),
         .MemtoReg  (id_MemtoReg),
         .id_csr_we (id_csr_we),
         .Is_System (is_system_id),
         .is_ecall  (id_is_ecall),
-        .is_ebreak (id_is_ebreak) 
+        .is_ebreak (id_is_ebreak),
+        .is_fence_i(id_is_fence_i)
     );
 
     wire [11:0] id_csr_addr = id_instruction[31:20];
@@ -169,16 +175,44 @@ module top_pipelined (
     wire [11:0] ex_csr_addr;
     wire [31:0] ex_csr_rdata;
 
-    wire [31:0] branch_fwd_A = (id_rs1_addr != 5'b0 && id_rs1_addr == ex_rd_addr  && ex_RegWrite)  ? ex_alu_result :
-                               (id_rs1_addr != 5'b0 && id_rs1_addr == mem_rd_addr && mem_RegWrite) ? mem_forward_val :
-                               (id_rs1_addr != 5'b0 && id_rs1_addr == wb_rd_addr  && wb_RegWrite)  ? wb_write_data :
-                               id_rs1_data;
+    wire [3:0] mem_we_map;
+    wire dmem_req_active = mem_MemRead | (mem_we_map != 4'b0000);
+
+    hazard_detection_unit my_hdu (
+        .id_rs1_addr  (id_rs1_addr),
+        .id_rs2_addr  (id_rs2_addr),
+        .ex_rd_addr   (ex_rd_addr),
+        .ex_MemRead   (ex_MemRead),
+        .is_system_id (is_system_id),
+        .id_funct3    (id_instruction[14:12]),
+        .id_csr_addr  (id_csr_addr),
+        .ex_csr_we    (ex_csr_we),
+        .ex_csr_addr  (ex_csr_addr),
+        .mem_csr_we   (mem_csr_we),
+        .mem_csr_addr (mem_csr_addr),
+        
+        .if_req       (imem_req),
+        .if_ready     (imem_ready),
+        .mem_req      (dmem_req_active),
+        .mem_ready    (dmem_ready),
+        
+        .trap_flush   (trap_flush),
+        .control_flush(control_flush),
+        .halt_cpu     (fence_stall),        
+        .pc_en        (pc_en),
+        .if_id_en     (if_id_en),
+        .id_ex_en     (id_ex_en),
+        .ex_mem_en    (ex_mem_en),
+        .mem_wb_en    (mem_wb_en),
+        .if_id_clr    (if_id_clr),
+        .id_ex_clr    (id_ex_clr)
+    );
 
     id_ex_reg my_id_ex_reg (
         .clk          (clk), 
         .rst          (rst),
-        .en           (ID_EX_en),
-        .clr          (ID_EX_clr),      
+        .en           (id_ex_en),
+        .clr          (id_ex_clr),      
         .id_RegWrite  (id_RegWrite),    
         .id_MemtoReg  (id_MemtoReg), 
         .id_MemRead   (id_MemRead),
@@ -239,6 +273,11 @@ module top_pipelined (
         endcase
     end
 
+    wire [31:0] branch_fwd_A = (id_rs1_addr != 5'b0 && id_rs1_addr == ex_rd_addr  && ex_RegWrite)  ? ex_alu_result :
+                               (id_rs1_addr != 5'b0 && id_rs1_addr == mem_rd_addr && mem_RegWrite) ? mem_forward_val :
+                               (id_rs1_addr != 5'b0 && id_rs1_addr == wb_rd_addr  && wb_RegWrite)  ? wb_write_data :
+                               id_rs1_data;
+
     wire [31:0] branch_fwd_B = (id_rs2_addr != 5'b0 && id_rs2_addr == ex_rd_addr  && ex_RegWrite)  ? ex_alu_result :
                                (id_rs2_addr != 5'b0 && id_rs2_addr == mem_rd_addr && mem_RegWrite) ? mem_forward_val :
                                (id_rs2_addr != 5'b0 && id_rs2_addr == wb_rd_addr  && wb_RegWrite)  ? wb_write_data :
@@ -274,9 +313,10 @@ module top_pipelined (
                         wb_is_mret    ? csr_mepc :
                         (id_Jump == 2'b10) ? ((branch_fwd_A + id_imm_ext) & 32'hFFFFFFFE) : 
                         (id_Jump == 2'b01 | branch_condition) ? id_branch_target : 
+                        id_is_fence_i ? (id_pc + 32'd4) : 
                         if_pc_plus_4;
     
-    assign control_flush = !ID_EX_clr && (branch_condition || (id_Jump == 2'b01) || (id_Jump == 2'b10));
+    assign control_flush = !id_ex_clr && (branch_condition || (id_Jump == 2'b01) || (id_Jump == 2'b10) || id_is_fence_i);
 
     always @(*) begin
         case (forward_A) 
@@ -308,10 +348,8 @@ module top_pipelined (
         .zero      ()
     );
     
-    wire [31:0] op_data;
+    wire [31:0] op_data = ex_ALUSrc ? ex_imm_ext : forward_rs1_data; 
     wire [31:0] ex_csr_wdata_computed;
-    
-    assign op_data = ex_ALUSrc ? ex_imm_ext : forward_rs1_data; 
     
     csr_alu u_csr_alu (
         .csr_rdata (ex_csr_rdata),        
@@ -321,13 +359,12 @@ module top_pipelined (
     );
     
     wire [31:0] ex_branch_target = ex_pc + ex_imm_ext; 
-
     assign trap_flush = wb_trap_taken | wb_is_mret;
 
     ex_mem_reg my_ex_mem_reg (
         .clk              (clk), 
         .rst              (rst),
-        .en               (~mem_stall),
+        .en               (ex_mem_en),
         .clr              (trap_flush),
         .ex_RegWrite      (ex_RegWrite), 
         .ex_MemtoReg      (ex_MemtoReg), 
@@ -379,7 +416,7 @@ module top_pipelined (
     mem_wb_reg my_mem_wb_reg (
         .clk              (clk), 
         .rst              (rst),
-        .en               (~mem_stall),
+        .en               (mem_wb_en),
         .clr              (trap_flush),
         .mem_RegWrite     (mem_RegWrite), 
         .mem_MemtoReg     (mem_MemtoReg), 
@@ -478,17 +515,6 @@ module top_pipelined (
         .forward_B      (forward_B)         
     );
 
-    assign load_use_hazard = ex_MemRead && (ex_rd_addr != 5'b0) && 
-                             ((ex_rd_addr == id_rs1_addr) || (ex_rd_addr == id_rs2_addr));
-
-    wire csr_hazard = is_system_id && (id_instruction[14:12] != 3'b000) && (
-        (ex_csr_we  && (ex_csr_addr  == id_csr_addr)) ||
-        (mem_csr_we && (mem_csr_addr == id_csr_addr))
-    );
-    
-    assign reg_stall = load_use_hazard | csr_hazard;
-
-    wire [3:0]  mem_we_map;
     wire [31:0] mem_shifted_wdata; 
     wire [31:0] raw_ram_out = dmem_rdata;
 
@@ -510,7 +536,7 @@ module top_pipelined (
 
     assign dmem_addr    = {mem_alu_result[31:2], 2'b00};      
     assign dmem_wdata   = mem_shifted_wdata;        
-    assign dmem_wstrb   = mem_we_map;            
+    assign dmem_wstrb   = mem_we_map;           
     assign dmem_read_en = mem_MemRead;
     
 endmodule
