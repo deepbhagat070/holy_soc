@@ -1,8 +1,8 @@
 
-![Holy SoC Architecture Banner](docs/holy_soc_banner.png)
 
 
-# Holy SoC RISC-V Architecture
+
+RISC-V Architecture
 
 This repository tracks the development of a 5-stage pipelined RISC-V System-on-Chip. It currently houses two distinct architectural iterations: a stable baseline using a custom interconnect, and a next-generation architecture implementing standard AMBA AXI and a cache hierarchy.
 
